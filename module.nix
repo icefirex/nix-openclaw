@@ -97,6 +97,14 @@ let
       slots = {};
     };
   });
+
+  # Generate exports for all secrets
+  secretExports = lib.concatStringsSep "\n" (lib.mapAttrsToList (envVar: secretPath: ''
+    if [ -f "${secretPath}" ]; then
+      export ${envVar}=$(${pkgs.coreutils}/bin/cat "${secretPath}")
+    fi
+  '') cfg.secrets);
+
 in {
   options.programs.openclaw = {
     enable = lib.mkEnableOption "OpenClaw - AI assistant gateway for messaging platforms";
@@ -104,7 +112,8 @@ in {
     model = lib.mkOption {
       type = lib.types.str;
       default = "anthropic/claude-sonnet-4";
-      description = "Default AI model to use";
+      description = "Default AI model to use (format: provider/model-name)";
+      example = "zai/glm-4.7";
     };
 
     thinkingDefault = lib.mkOption {
@@ -119,19 +128,38 @@ in {
       description = "Port for the openclaw gateway";
     };
 
+    # Generic secrets configuration
+    secrets = lib.mkOption {
+      type = lib.types.attrsOf lib.types.path;
+      default = {};
+      description = ''
+        Attribute set mapping environment variable names to secret file paths.
+        Each secret file will be read and exported as the corresponding env var.
+      '';
+      example = lib.literalExpression ''
+        {
+          ANTHROPIC_API_KEY = "/run/secrets/anthropic-api-key";
+          ZAI_API_KEY = "/run/secrets/zai-api-key";
+          OPENAI_API_KEY = "/run/secrets/openai-api-key";
+        }
+      '';
+    };
+
     telegram = {
       enable = lib.mkEnableOption "Telegram integration";
 
       botTokenFile = lib.mkOption {
-        type = lib.types.str;
-        default = "telegram-bot-token";
-        description = "Path to file containing Telegram bot token (relative to state dir)";
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = "Absolute path to file containing Telegram bot token";
+        example = "/run/secrets/telegram-bot-token";
       };
 
       allowFrom = lib.mkOption {
         type = lib.types.listOf lib.types.int;
         default = [];
         description = "List of Telegram user IDs allowed to interact with the bot";
+        example = [ 123456789 ];
       };
 
       groups = lib.mkOption {
@@ -145,15 +173,17 @@ in {
       enable = lib.mkEnableOption "Slack integration";
 
       appTokenFile = lib.mkOption {
-        type = lib.types.str;
-        default = "slack-app-token";
-        description = "Path to file containing Slack app token (relative to state dir)";
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = "Absolute path to file containing Slack app token (xapp-...)";
+        example = "/run/secrets/slack-app-token";
       };
 
       botTokenFile = lib.mkOption {
-        type = lib.types.str;
-        default = "slack-bot-token";
-        description = "Path to file containing Slack bot token (relative to state dir)";
+        type = lib.types.nullOr lib.types.path;
+        default = null;
+        description = "Absolute path to file containing Slack bot token (xoxb-...)";
+        example = "/run/secrets/slack-bot-token";
       };
 
       dmPolicy = lib.mkOption {
@@ -173,9 +203,9 @@ in {
       enable = lib.mkEnableOption "Local Whisper audio transcription";
 
       model = lib.mkOption {
-        type = lib.types.str;
+        type = lib.types.enum [ "tiny" "base" "small" "medium" "large" ];
         default = "base";
-        description = "Whisper model size (tiny, base, small, medium, large)";
+        description = "Whisper model size";
       };
     };
 
@@ -184,9 +214,27 @@ in {
         enable = lib.mkEnableOption "Asana integration skill";
       };
     };
+
+    stateDir = lib.mkOption {
+      type = lib.types.str;
+      default = ".openclaw";
+      description = "State directory relative to HOME";
+    };
   };
 
   config = lib.mkIf cfg.enable {
+    # Assertions for required options
+    assertions = [
+      {
+        assertion = cfg.telegram.enable -> cfg.telegram.botTokenFile != null;
+        message = "programs.openclaw.telegram.botTokenFile must be set when Telegram is enabled";
+      }
+      {
+        assertion = cfg.slack.enable -> (cfg.slack.appTokenFile != null && cfg.slack.botTokenFile != null);
+        message = "programs.openclaw.slack.appTokenFile and botTokenFile must be set when Slack is enabled";
+      }
+    ];
+
     environment.systemPackages = [ openclaw ]
       ++ lib.optional cfg.whisper.enable pkgs.openai-whisper;
 
@@ -198,14 +246,32 @@ in {
 
       environment = {
         HOME = "%h";
-        OPENCLAW_CONFIG_PATH = "%h/.openclaw/openclaw.json";
-        OPENCLAW_STATE_DIR = "%h/.openclaw";
+        OPENCLAW_CONFIG_PATH = "%h/${cfg.stateDir}/openclaw.json";
+        OPENCLAW_STATE_DIR = "%h/${cfg.stateDir}";
       };
 
       script = ''
-        if [ -f "$HOME/.openclaw/${cfg.telegram.botTokenFile}" ]; then
-          export TELEGRAM_BOT_TOKEN=$(${pkgs.coreutils}/bin/cat "$HOME/.openclaw/${cfg.telegram.botTokenFile}")
-        fi
+        # Load all secrets as environment variables
+        ${secretExports}
+
+        # Load Telegram bot token
+        ${lib.optionalString (cfg.telegram.enable && cfg.telegram.botTokenFile != null) ''
+          if [ -f "${cfg.telegram.botTokenFile}" ]; then
+            export TELEGRAM_BOT_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.telegram.botTokenFile}")
+          fi
+        ''}
+
+        # Load Slack tokens
+        ${lib.optionalString (cfg.slack.enable && cfg.slack.appTokenFile != null) ''
+          if [ -f "${cfg.slack.appTokenFile}" ]; then
+            export SLACK_APP_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.slack.appTokenFile}")
+          fi
+        ''}
+        ${lib.optionalString (cfg.slack.enable && cfg.slack.botTokenFile != null) ''
+          if [ -f "${cfg.slack.botTokenFile}" ]; then
+            export SLACK_BOT_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.slack.botTokenFile}")
+          fi
+        ''}
 
         GATEWAY_TOKEN="''${OPENCLAW_GATEWAY_TOKEN:-openclaw-local-$(${pkgs.inetutils}/bin/hostname)}"
         export OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN"
@@ -217,55 +283,62 @@ in {
         Type = "simple";
         ExecStartPre = pkgs.writeShellScript "openclaw-setup" ''
           set -e
-          ${pkgs.coreutils}/bin/mkdir -p "$HOME/.openclaw/workspace" "$HOME/.openclaw/agents/main/sessions" "$HOME/.openclaw/credentials" "$HOME/.openclaw/skills"
-          ${pkgs.coreutils}/bin/chmod 700 "$HOME/.openclaw"
+          STATE_DIR="$HOME/${cfg.stateDir}"
+
+          ${pkgs.coreutils}/bin/mkdir -p "$STATE_DIR/workspace" "$STATE_DIR/agents/main/sessions" "$STATE_DIR/credentials" "$STATE_DIR/skills"
+          ${pkgs.coreutils}/bin/chmod 700 "$STATE_DIR"
 
           ${lib.optionalString (enabledSkills != {}) ''
             echo "Setting up openclaw skills..."
-            ${pkgs.coreutils}/bin/rm -rf "$HOME/.openclaw/skills"
-            ${pkgs.coreutils}/bin/mkdir -p "$HOME/.openclaw/skills"
-            ${pkgs.coreutils}/bin/cp -r ${skillsDir}/* "$HOME/.openclaw/skills/" 2>/dev/null || true
-            ${pkgs.coreutils}/bin/chmod -R u+w "$HOME/.openclaw/skills"
+            ${pkgs.coreutils}/bin/rm -rf "$STATE_DIR/skills"
+            ${pkgs.coreutils}/bin/mkdir -p "$STATE_DIR/skills"
+            ${pkgs.coreutils}/bin/cp -r ${skillsDir}/* "$STATE_DIR/skills/" 2>/dev/null || true
+            ${pkgs.coreutils}/bin/chmod -R u+w "$STATE_DIR/skills"
             echo "Skills installed: ${lib.concatStringsSep ", " (lib.attrNames enabledSkills)}"
 
             ${lib.optionalString (cfg.skills.asana.enable or false) ''
-              if [ ! -f "$HOME/.openclaw/asana/token.json" ]; then
+              if [ ! -f "$STATE_DIR/asana/token.json" ]; then
                 echo ""
                 echo "Asana skill requires OAuth setup!"
-                echo "   Run: node ~/.openclaw/skills/asana/scripts/configure.mjs --client-id YOUR_ID --client-secret YOUR_SECRET"
-                echo "   Then: node ~/.openclaw/skills/asana/scripts/oauth_oob.mjs authorize"
+                echo "   Run: node $STATE_DIR/skills/asana/scripts/configure.mjs --client-id YOUR_ID --client-secret YOUR_SECRET"
+                echo "   Then: node $STATE_DIR/skills/asana/scripts/oauth_oob.mjs authorize"
                 echo ""
               fi
             ''}
           ''}
 
-          ${pkgs.gnused}/bin/sed 's|/tmp/openclaw-workspace|'"$HOME"'/.openclaw/workspace|g' ${configFile} > "$HOME/.openclaw/openclaw.json"
+          # Generate config with workspace path fixed
+          ${pkgs.gnused}/bin/sed 's|/tmp/openclaw-workspace|'"$STATE_DIR"'/workspace|g' ${configFile} > "$STATE_DIR/openclaw.json"
 
-          TOKEN_FILE="$HOME/.openclaw/${cfg.telegram.botTokenFile}"
-          if [ -f "$TOKEN_FILE" ]; then
-            TOKEN=$(${pkgs.coreutils}/bin/cat "$TOKEN_FILE")
-            ${pkgs.jq}/bin/jq --arg token "$TOKEN" '.channels.telegram.botToken = $token' \
-              "$HOME/.openclaw/openclaw.json" > "$HOME/.openclaw/openclaw.json.tmp"
-            ${pkgs.coreutils}/bin/mv "$HOME/.openclaw/openclaw.json.tmp" "$HOME/.openclaw/openclaw.json"
-          fi
+          # Inject Telegram bot token into config
+          ${lib.optionalString (cfg.telegram.enable && cfg.telegram.botTokenFile != null) ''
+            if [ -f "${cfg.telegram.botTokenFile}" ]; then
+              TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.telegram.botTokenFile}")
+              ${pkgs.jq}/bin/jq --arg token "$TOKEN" '.channels.telegram.botToken = $token' \
+                "$STATE_DIR/openclaw.json" > "$STATE_DIR/openclaw.json.tmp"
+              ${pkgs.coreutils}/bin/mv "$STATE_DIR/openclaw.json.tmp" "$STATE_DIR/openclaw.json"
+            fi
+          ''}
 
-          SLACK_APP_TOKEN_FILE="$HOME/.openclaw/${cfg.slack.appTokenFile}"
-          SLACK_BOT_TOKEN_FILE="$HOME/.openclaw/${cfg.slack.botTokenFile}"
-          if [ -f "$SLACK_APP_TOKEN_FILE" ] && [ -f "$SLACK_BOT_TOKEN_FILE" ]; then
-            SLACK_APP_TOKEN=$(${pkgs.coreutils}/bin/cat "$SLACK_APP_TOKEN_FILE")
-            SLACK_BOT_TOKEN=$(${pkgs.coreutils}/bin/cat "$SLACK_BOT_TOKEN_FILE")
-            ${pkgs.jq}/bin/jq --arg appToken "$SLACK_APP_TOKEN" --arg botToken "$SLACK_BOT_TOKEN" \
-              '.channels.slack.appToken = $appToken | .channels.slack.botToken = $botToken' \
-              "$HOME/.openclaw/openclaw.json" > "$HOME/.openclaw/openclaw.json.tmp"
-            ${pkgs.coreutils}/bin/mv "$HOME/.openclaw/openclaw.json.tmp" "$HOME/.openclaw/openclaw.json"
-          fi
+          # Inject Slack tokens into config
+          ${lib.optionalString (cfg.slack.enable && cfg.slack.appTokenFile != null && cfg.slack.botTokenFile != null) ''
+            if [ -f "${cfg.slack.appTokenFile}" ] && [ -f "${cfg.slack.botTokenFile}" ]; then
+              SLACK_APP_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.slack.appTokenFile}")
+              SLACK_BOT_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.slack.botTokenFile}")
+              ${pkgs.jq}/bin/jq --arg appToken "$SLACK_APP_TOKEN" --arg botToken "$SLACK_BOT_TOKEN" \
+                '.channels.slack.appToken = $appToken | .channels.slack.botToken = $botToken' \
+                "$STATE_DIR/openclaw.json" > "$STATE_DIR/openclaw.json.tmp"
+              ${pkgs.coreutils}/bin/mv "$STATE_DIR/openclaw.json.tmp" "$STATE_DIR/openclaw.json"
+            fi
+          ''}
 
+          # Inject gateway token
           GATEWAY_TOKEN="openclaw-local-$(${pkgs.inetutils}/bin/hostname)"
           ${pkgs.jq}/bin/jq --arg token "$GATEWAY_TOKEN" '.gateway.auth.token = $token | .gateway.remote.token = $token' \
-            "$HOME/.openclaw/openclaw.json" > "$HOME/.openclaw/openclaw.json.tmp"
-          ${pkgs.coreutils}/bin/mv "$HOME/.openclaw/openclaw.json.tmp" "$HOME/.openclaw/openclaw.json"
+            "$STATE_DIR/openclaw.json" > "$STATE_DIR/openclaw.json.tmp"
+          ${pkgs.coreutils}/bin/mv "$STATE_DIR/openclaw.json.tmp" "$STATE_DIR/openclaw.json"
 
-          ${pkgs.coreutils}/bin/chmod 600 "$HOME/.openclaw/openclaw.json"
+          ${pkgs.coreutils}/bin/chmod 600 "$STATE_DIR/openclaw.json"
         '';
         Restart = "always";
         RestartSec = "10s";

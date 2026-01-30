@@ -4,11 +4,12 @@ NixOS module for [OpenClaw](https://openclaw.ai) - AI assistant gateway for mess
 
 ## Features
 
-- Declarative NixOS configuration via `programs.openclaw`
+- Fully declarative NixOS configuration via `programs.openclaw`
 - Systemd user service for the gateway
 - Telegram and Slack integration
 - Optional Whisper audio transcription
 - Skills registry (Asana, etc.)
+- Generic secrets management (works with any provider, sops-nix, agenix, or manual)
 
 ## Installation
 
@@ -36,6 +37,8 @@ Add to your flake inputs:
 
 ## Configuration
 
+All secrets are referenced by file path. Just point to your secret files and rebuild.
+
 ```nix
 { config, pkgs, ... }:
 
@@ -43,109 +46,123 @@ Add to your flake inputs:
   programs.openclaw = {
     enable = true;
 
-    # AI model (default: anthropic/claude-sonnet-4)
-    model = "anthropic/claude-sonnet-4";
-    thinkingDefault = "high";
+    # AI model (format: provider/model-name)
+    model = "zai/glm-4.7";
 
-    # Gateway port (default: 18789)
-    gatewayPort = 18789;
+    # Secrets - map any env var to a secret file
+    secrets = {
+      ZAI_API_KEY = "/run/secrets/zai-api-key";
+    };
 
     # Telegram integration
     telegram = {
       enable = true;
+      botTokenFile = "/run/secrets/telegram-bot-token";
       allowFrom = [ 123456789 ]; # Your Telegram user ID
     };
 
-    # Slack integration (optional)
-    # slack.enable = true;
-
     # Whisper audio transcription (optional)
-    # whisper.enable = true;
-    # whisper.model = "base";
-
-    # Skills
-    # skills.asana.enable = true;
+    whisper = {
+      enable = true;
+      model = "base";
+    };
   };
 }
 ```
 
-## Setup
+## Secrets
 
-After enabling, create the bot token file:
-
-```bash
-mkdir -p ~/.openclaw
-echo "YOUR_TELEGRAM_BOT_TOKEN" > ~/.openclaw/telegram-bot-token
-chmod 600 ~/.openclaw/telegram-bot-token
-```
-
-The gateway starts automatically as a systemd user service:
-
-```bash
-systemctl --user status openclaw-gateway
-journalctl --user -u openclaw-gateway -f
-```
-
----
-
-## AI Models
-
-OpenClaw supports multiple AI providers. The model format is `provider/model-name`.
-
-### Supported Providers
-
-| Provider | Model Format | API Key Environment Variable |
-|----------|--------------|------------------------------|
-| Anthropic | `anthropic/claude-sonnet-4`, `anthropic/claude-opus-4-5` | `ANTHROPIC_API_KEY` |
-| OpenAI | `openai/gpt-4o`, `openai/gpt-4-turbo` | `OPENAI_API_KEY` |
-| Z.AI | `zai/glm-4.7` | `ZAI_API_KEY` |
-| Groq | `groq/llama-3.3-70b` | `GROQ_API_KEY` |
-| Google | `google/gemini-2.0-flash` | `GEMINI_API_KEY` |
-
-### Setting up API Keys
-
-API keys should be set as environment variables for the systemd user service:
-
-```bash
-# Create the environment.d directory
-mkdir -p ~/.config/environment.d
-
-# Add your API key (example for Anthropic)
-echo 'ANTHROPIC_API_KEY=sk-ant-your-key-here' > ~/.config/environment.d/openclaw.conf
-chmod 600 ~/.config/environment.d/openclaw.conf
-
-# Reload and restart
-systemctl --user daemon-reload
-systemctl --user restart openclaw-gateway
-```
-
-You can add multiple API keys to the same file:
-
-```bash
-cat > ~/.config/environment.d/openclaw.conf << 'EOF'
-ANTHROPIC_API_KEY=sk-ant-xxx
-OPENAI_API_KEY=sk-xxx
-ZAI_API_KEY=xxx.xxx
-EOF
-chmod 600 ~/.config/environment.d/openclaw.conf
-```
-
-### Example: Using Z.AI
+The `secrets` option is a generic attribute set that maps environment variable names to secret file paths. This works with any provider - just use the correct env var name:
 
 ```nix
-programs.openclaw = {
-  enable = true;
-  model = "zai/glm-4.7";
-  # ...
+secrets = {
+  # Common providers
+  ANTHROPIC_API_KEY = "/run/secrets/anthropic";
+  OPENAI_API_KEY = "/run/secrets/openai";
+  ZAI_API_KEY = "/run/secrets/zai";
+  GROQ_API_KEY = "/run/secrets/groq";
+  GEMINI_API_KEY = "/run/secrets/gemini";
+
+  # Any other env var your setup needs
+  CUSTOM_API_KEY = "/run/secrets/custom";
 };
+```
+
+### Manual Setup
+
+```bash
+sudo mkdir -p /run/secrets
+echo "your-api-key" | sudo tee /run/secrets/zai-api-key
+echo "123456:ABC-token" | sudo tee /run/secrets/telegram-bot-token
+sudo chmod 600 /run/secrets/*
 ```
 
 ---
 
 <details>
-<summary><h2>Slack Integration</h2></summary>
+<summary><h2>Using with sops-nix</h2></summary>
 
-### Configuration
+```nix
+{ config, ... }:
+
+{
+  sops.secrets = {
+    zai-api-key = {};
+    telegram-bot-token = {};
+  };
+
+  programs.openclaw = {
+    enable = true;
+    model = "zai/glm-4.7";
+
+    secrets = {
+      ZAI_API_KEY = config.sops.secrets.zai-api-key.path;
+    };
+
+    telegram = {
+      enable = true;
+      botTokenFile = config.sops.secrets.telegram-bot-token.path;
+      allowFrom = [ 123456789 ];
+    };
+  };
+}
+```
+
+</details>
+
+<details>
+<summary><h2>Using with agenix</h2></summary>
+
+```nix
+{ config, ... }:
+
+{
+  age.secrets = {
+    zai-api-key.file = ../secrets/zai-api-key.age;
+    telegram-bot-token.file = ../secrets/telegram-bot-token.age;
+  };
+
+  programs.openclaw = {
+    enable = true;
+    model = "zai/glm-4.7";
+
+    secrets = {
+      ZAI_API_KEY = config.age.secrets.zai-api-key.path;
+    };
+
+    telegram = {
+      enable = true;
+      botTokenFile = config.age.secrets.telegram-bot-token.path;
+      allowFrom = [ 123456789 ];
+    };
+  };
+}
+```
+
+</details>
+
+<details>
+<summary><h2>Slack Integration</h2></summary>
 
 ```nix
 programs.openclaw = {
@@ -153,8 +170,10 @@ programs.openclaw = {
 
   slack = {
     enable = true;
-    dmPolicy = "pairing";    # "pairing" or "open"
-    groupPolicy = "open";    # "open", "allowlist", or "disabled"
+    appTokenFile = "/run/secrets/slack-app-token";
+    botTokenFile = "/run/secrets/slack-bot-token";
+    dmPolicy = "pairing";
+    groupPolicy = "open";
   };
 };
 ```
@@ -162,41 +181,15 @@ programs.openclaw = {
 ### Setup
 
 1. Create a Slack App at https://api.slack.com/apps
-
-2. Enable Socket Mode and get an **App-Level Token** (starts with `xapp-`)
-
-3. Add Bot Token Scopes:
-   - `app_mentions:read`
-   - `chat:write`
-   - `im:history`
-   - `im:read`
-   - `im:write`
-
-4. Install the app to your workspace and get the **Bot Token** (starts with `xoxb-`)
-
-5. Save the tokens:
-
-```bash
-mkdir -p ~/.openclaw
-echo "xapp-your-app-token" > ~/.openclaw/slack-app-token
-echo "xoxb-your-bot-token" > ~/.openclaw/slack-bot-token
-chmod 600 ~/.openclaw/slack-*-token
-```
-
-6. Restart the gateway:
-
-```bash
-systemctl --user restart openclaw-gateway
-```
+2. Enable Socket Mode and get an **App-Level Token** (`xapp-...`)
+3. Add Bot Token Scopes: `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`
+4. Install the app and get the **Bot Token** (`xoxb-...`)
+5. Save both tokens to your secret files
 
 </details>
 
 <details>
 <summary><h2>Whisper Audio Transcription</h2></summary>
-
-Enable local audio transcription using OpenAI Whisper:
-
-### Configuration
 
 ```nix
 programs.openclaw = {
@@ -204,12 +197,10 @@ programs.openclaw = {
 
   whisper = {
     enable = true;
-    model = "base";  # Options: tiny, base, small, medium, large
+    model = "base";  # tiny, base, small, medium, large
   };
 };
 ```
-
-### Model Sizes
 
 | Model | Size | Speed | Accuracy |
 |-------|------|-------|----------|
@@ -219,100 +210,68 @@ programs.openclaw = {
 | medium | ~1.5GB | Slow | High |
 | large | ~3GB | Slowest | Highest |
 
-The model downloads automatically on first use. For VMs or systems with limited resources, `tiny` or `base` is recommended.
-
-### Usage
-
-Send voice messages to your Telegram bot - they will be automatically transcribed using Whisper before being processed by the AI.
-
 </details>
 
 <details>
 <summary><h2>Asana Integration</h2></summary>
 
-The Asana skill allows OpenClaw to manage your Asana tasks.
-
-### Configuration
-
 ```nix
 programs.openclaw = {
   enable = true;
-
   skills.asana.enable = true;
 };
 ```
 
-### OAuth Setup
-
-1. Create an Asana app at https://app.asana.com/0/developer-console
-
-2. Configure the app:
-   - Enable scopes: `tasks:read`, `tasks:write`, `projects:read`
-   - Set redirect URI: `urn:ietf:wg:oauth:2.0:oob`
-
-3. Configure the skill with your credentials:
+After rebuild, run the OAuth setup:
 
 ```bash
-node ~/.openclaw/skills/asana/scripts/configure.mjs \
-  --client-id "YOUR_CLIENT_ID" \
-  --client-secret "YOUR_CLIENT_SECRET"
-```
-
-4. Start the OAuth flow:
-
-```bash
+node ~/.openclaw/skills/asana/scripts/configure.mjs --client-id "ID" --client-secret "SECRET"
 node ~/.openclaw/skills/asana/scripts/oauth_oob.mjs authorize
-```
-
-5. Open the URL in your browser, authorize the app, and copy the code
-
-6. Exchange the code for a token:
-
-```bash
-node ~/.openclaw/skills/asana/scripts/oauth_oob.mjs token --code "YOUR_CODE"
-```
-
-7. Restart the gateway:
-
-```bash
+# Follow URL, get code
+node ~/.openclaw/skills/asana/scripts/oauth_oob.mjs token --code "CODE"
 systemctl --user restart openclaw-gateway
 ```
-
-### Usage
-
-You can now ask OpenClaw to:
-- "Show my Asana tasks"
-- "Create a task: Review PR #123"
-- "Mark task X as complete"
 
 </details>
 
 ---
 
-## Example
+## All Options
 
-See the `example/` directory for a minimal VM configuration.
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enable` | bool | `false` | Enable OpenClaw |
+| `model` | string | `"anthropic/claude-sonnet-4"` | AI model (provider/model-name) |
+| `thinkingDefault` | string | `"high"` | Default thinking level |
+| `gatewayPort` | int | `18789` | Gateway port |
+| `stateDir` | string | `".openclaw"` | State directory (relative to HOME) |
+| `secrets` | attrsOf path | `{}` | Map of env var names to secret file paths |
+| `telegram.enable` | bool | `false` | Enable Telegram |
+| `telegram.botTokenFile` | path | required | Path to bot token file |
+| `telegram.allowFrom` | list of int | `[]` | Allowed user IDs |
+| `slack.enable` | bool | `false` | Enable Slack |
+| `slack.appTokenFile` | path | required | Path to app token file |
+| `slack.botTokenFile` | path | required | Path to bot token file |
+| `whisper.enable` | bool | `false` | Enable Whisper |
+| `whisper.model` | enum | `"base"` | Model size |
+| `skills.asana.enable` | bool | `false` | Enable Asana skill |
+
+---
 
 ## Troubleshooting
 
-### Check service status
-
 ```bash
+# Check service
 systemctl --user status openclaw-gateway
 journalctl --user -u openclaw-gateway -f
-```
 
-### Check configuration
-
-```bash
+# Check config
 cat ~/.openclaw/openclaw.json | jq .
 ```
 
-### Common issues
+## Example
 
-- **"Missing workspace template"**: Update the flake to get the latest package with docs included
-- **Model warnings**: Ensure model format is `provider/model-name` (e.g., `zai/glm-4.7` not just `z.ai`)
-- **API key not found**: Check `~/.config/environment.d/` files and restart the service
+See the `example/` directory for a minimal VM configuration.
 
 ## License
 
