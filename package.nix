@@ -46,6 +46,7 @@ stdenv.mkDerivation (finalAttrs: {
     cp -r extensions $out/lib/openclaw/ 2>/dev/null || true
     cp -r apps $out/lib/openclaw/ 2>/dev/null || true
     cp -r skills $out/lib/openclaw/ 2>/dev/null || true
+    cp -r docs $out/lib/openclaw/ 2>/dev/null || true
     makeWrapper ${nodejs}/bin/node $out/bin/openclaw \
       --add-flags "$out/lib/openclaw/dist/entry.js"
     runHook postInstall
