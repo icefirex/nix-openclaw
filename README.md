@@ -271,7 +271,7 @@ cat ~/.openclaw/openclaw.json | jq .
 
 ## Example
 
-See the `example/` directory for a minimal VM configuration.
+See the `example/` directory for a reference configuration showing the OpenClaw-specific options.
 
 ## License
 

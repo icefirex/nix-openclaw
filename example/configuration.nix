@@ -1,4 +1,8 @@
-# Minimal NixOS configuration with OpenClaw
+# Example NixOS configuration with OpenClaw
+#
+# This shows only the OpenClaw-specific parts.
+# Add these to your existing configuration.nix
+
 { config, pkgs, ... }:
 
 {
@@ -6,51 +10,51 @@
     ./hardware-configuration.nix
   ];
 
-  boot.loader.grub.enable = true;
-  boot.loader.grub.device = "/dev/sda";
+  # Your existing boot/network/user config here...
+  # boot.loader.systemd-boot.enable = true;
+  # networking.hostName = "myhost";
+  # users.users.myuser = { ... };
 
-  networking.hostName = "openclaw-vm";
-  networking.networkmanager.enable = true;
-
-  services.openssh.enable = true;
-
-  users.users.demo = {
-    isNormalUser = true;
-    extraGroups = [ "wheel" "networkmanager" ];
-    initialPassword = "changeme";
-  };
-
-  # Create secrets directory
+  # Create secrets directory (or use sops-nix/agenix)
   systemd.tmpfiles.rules = [
     "d /run/secrets 0700 root root -"
   ];
 
-  # OpenClaw
+  # OpenClaw configuration
   programs.openclaw = {
     enable = true;
 
+    # Model format: provider/model-name
     model = "zai/glm-4.7";
 
-    # Generic secrets - works with any provider
+    # Secrets - map env var names to secret file paths
     secrets = {
       ZAI_API_KEY = "/run/secrets/zai-api-key";
-      # Add more as needed:
       # ANTHROPIC_API_KEY = "/run/secrets/anthropic";
       # OPENAI_API_KEY = "/run/secrets/openai";
     };
 
+    # Telegram
     telegram = {
       enable = true;
       botTokenFile = "/run/secrets/telegram-bot-token";
       allowFrom = [
-        # Your Telegram user ID
+        # Your Telegram user ID(s)
       ];
     };
 
+    # Optional: Whisper for voice transcription
     whisper = {
       enable = true;
       model = "base";
     };
+
+    # Optional: Slack
+    # slack = {
+    #   enable = true;
+    #   appTokenFile = "/run/secrets/slack-app-token";
+    #   botTokenFile = "/run/secrets/slack-bot-token";
+    # };
   };
 
   nixpkgs.config.allowUnfree = true;
