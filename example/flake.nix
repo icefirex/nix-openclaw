@@ -14,7 +14,7 @@
 
     # Import the openclaw module
     # After pushing to GitHub, change this to:
-    # openclaw.url = "github:YOUR_USERNAME/nix-openclaw";
+    # openclaw.url = "github:icefirex/nix-openclaw";
     openclaw.url = "path:../";
     openclaw.inputs.nixpkgs.follows = "nixpkgs";
   };

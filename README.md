@@ -18,7 +18,7 @@ Add to your flake inputs:
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    openclaw.url = "github:YOUR_USERNAME/nix-openclaw";
+    openclaw.url = "github:icefirex/nix-openclaw";
     openclaw.inputs.nixpkgs.follows = "nixpkgs";
   };
 
