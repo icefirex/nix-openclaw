@@ -1,3 +1,9 @@
+<p align="center">
+  <img align="middle" src="https://brand.nixos.org/logos/nixos-logo-default-gradient-white-regular-horizontal-recommended.svg" height="130" alt="NixOS"><img align="middle" alt="+" src="https://img.icons8.com/ios-filled/50/FFFFFF/plus-math.png" height="35">
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <img align="middle" src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text.png" height="80" alt="OpenClaw">
+</p>
+
 # nix-openclaw
 
 NixOS module for [OpenClaw](https://openclaw.ai) - AI assistant gateway for messaging platforms.
@@ -10,6 +16,43 @@ NixOS module for [OpenClaw](https://openclaw.ai) - AI assistant gateway for mess
 - Optional Whisper audio transcription
 - Skills registry (Asana, etc.)
 - Generic secrets management (works with any provider, sops-nix, agenix, or manual)
+- Pre-built VM images (QCOW2, ISO, VMware, VirtualBox, Proxmox)
+
+## Quick Start: VM Images
+
+Build a ready-to-run VM image directly from the flake:
+
+```bash
+# QCOW2 - For QEMU/KVM/Proxmox
+nix build github:icefirex/nix-openclaw#qcow
+
+# ISO - Bootable installer
+nix build github:icefirex/nix-openclaw#iso
+
+# VMware
+nix build github:icefirex/nix-openclaw#vmware
+
+# VirtualBox
+nix build github:icefirex/nix-openclaw#virtualbox
+
+# Proxmox LXC container
+nix build github:icefirex/nix-openclaw#proxmox-lxc
+```
+
+After booting, create your secrets and configure:
+
+```bash
+# Login: admin / changeme
+sudo mkdir -p /run/secrets
+echo "your-api-key" | sudo tee /run/secrets/zai-api-key
+echo "your-telegram-token" | sudo tee /run/secrets/telegram-bot-token
+sudo chmod 600 /run/secrets/*
+
+# Edit /etc/nixos/configuration.nix to set your Telegram user ID
+sudo nixos-rebuild switch
+```
+
+The VM includes Cockpit (web UI on port 9090), SSH, and OpenClaw with Telegram and Whisper.
 
 ## Installation
 
@@ -269,10 +312,13 @@ journalctl --user -u openclaw-gateway -f
 cat ~/.openclaw/openclaw.json | jq .
 ```
 
-## Example
+## Examples
 
-See the `example/` directory for a reference configuration showing the OpenClaw-specific options.
+The `example/` directory contains reference configurations:
+
+- **`example/`** - Minimal OpenClaw options to add to an existing NixOS config
+- **`example/full-vm/`** - Complete VM configuration for manual NixOS installs (includes QEMU guest agent, Cockpit, etc.)
 
 ## License
 
-MIT
+[MIT](LICENSE)
