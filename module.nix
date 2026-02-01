@@ -307,17 +307,24 @@ in {
         User = cfg.user;
         Group = cfg.group;
 
-        # Kill any zombie process holding the port before starting
+        # Kill any zombie openclaw process holding the port before starting
+        # The "+" prefix runs as root so it can kill processes owned by any user
         ExecStartPre = [
-          (pkgs.writeShellScript "openclaw-kill-zombie" ''
-            # Kill any process holding port ${toString cfg.gatewayPort}
+          "+${pkgs.writeShellScript "openclaw-kill-zombie" ''
+            # Find process holding port ${toString cfg.gatewayPort}
             PORT_PID=$(${pkgs.lsof}/bin/lsof -ti tcp:${toString cfg.gatewayPort} 2>/dev/null || true)
             if [ -n "$PORT_PID" ]; then
-              echo "Killing zombie process $PORT_PID holding port ${toString cfg.gatewayPort}"
-              kill -9 $PORT_PID 2>/dev/null || true
-              sleep 1
+              # Only kill if it's an openclaw process (safety check)
+              PROC_NAME=$(${pkgs.procps}/bin/ps -p "$PORT_PID" -o comm= 2>/dev/null || true)
+              if [ "$PROC_NAME" = "openclaw" ] || [ "$PROC_NAME" = "openclaw-gate" ] || [ "$PROC_NAME" = "node" ]; then
+                echo "Killing stale openclaw process $PORT_PID ($PROC_NAME) holding port ${toString cfg.gatewayPort}"
+                kill -9 $PORT_PID 2>/dev/null || true
+                sleep 1
+              else
+                echo "Warning: Port ${toString cfg.gatewayPort} held by non-openclaw process $PORT_PID ($PROC_NAME), not killing"
+              fi
             fi
-          '')
+          ''}"
           (pkgs.writeShellScript "openclaw-setup" ''
             set -e
             STATE_DIR="/home/${cfg.user}/${cfg.stateDir}"
@@ -379,15 +386,20 @@ in {
           '')
         ];
 
-        # Ensure clean shutdown - kill any child processes
-        ExecStopPost = pkgs.writeShellScript "openclaw-cleanup" ''
-          # Kill any remaining process holding the port
+        # Ensure clean shutdown - kill any stale openclaw child processes
+        # The "+" prefix runs as root so it can kill processes owned by any user
+        ExecStopPost = "+${pkgs.writeShellScript "openclaw-cleanup" ''
+          # Find process holding port ${toString cfg.gatewayPort}
           PORT_PID=$(${pkgs.lsof}/bin/lsof -ti tcp:${toString cfg.gatewayPort} 2>/dev/null || true)
           if [ -n "$PORT_PID" ]; then
-            echo "Cleaning up process $PORT_PID still holding port ${toString cfg.gatewayPort}"
-            kill -9 $PORT_PID 2>/dev/null || true
+            # Only kill if it's an openclaw process (safety check)
+            PROC_NAME=$(${pkgs.procps}/bin/ps -p "$PORT_PID" -o comm= 2>/dev/null || true)
+            if [ "$PROC_NAME" = "openclaw" ] || [ "$PROC_NAME" = "openclaw-gate" ] || [ "$PROC_NAME" = "node" ]; then
+              echo "Cleaning up stale openclaw process $PORT_PID ($PROC_NAME) holding port ${toString cfg.gatewayPort}"
+              kill -9 $PORT_PID 2>/dev/null || true
+            fi
           fi
-        '';
+        ''}";
 
         # Restart configuration with limits to prevent infinite crash loops
         Restart = "on-failure";
