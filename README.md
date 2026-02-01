@@ -454,7 +454,7 @@ Check that secret files exist and have correct permissions (should be readable b
 
 ## Security
 
-OpenClaw is configured with security in mind:
+OpenClaw follows a **zero-trust security model** by default:
 
 - **Service isolation** - Runs as a dedicated user (not root)
 - **Localhost binding** - Gateway only listens on 127.0.0.1, not exposed to network
@@ -462,12 +462,31 @@ OpenClaw is configured with security in mind:
 - **Encrypted secrets** - Supports agenix/sops-nix for encrypted secret storage
 - **Automatic cleanup** - Safely terminates stale processes on restart
 
+### Zero-Trust: Keep the Dashboard Local
+
+> **⚠️ Do not expose the dashboard port to the network.**
+
+The gateway intentionally binds to `127.0.0.1` only. This is by design. Even with token authentication, exposing the dashboard port to the internet or local network is **strongly discouraged**:
+
+- Tokens can be leaked, brute-forced, or intercepted
+- The dashboard provides full control over your AI gateway
+- Network exposure increases attack surface unnecessarily
+
+**Always access the dashboard via SSH tunnel.** SSH provides:
+- Strong authentication (keys, not just tokens)
+- Encrypted transport
+- No additional open ports
+- Audit trail of who connected
+
+If you need remote access, SSH is already available and battle-tested. Adding another exposed port with weaker authentication defeats the purpose of defense in depth.
+
 ### Recommended Setup
 
 1. Use `gatewayTokenFile` with agenix for secure dashboard authentication
-2. Keep the firewall closed for the gateway port (default: 18789)
-3. Access dashboard only via SSH tunnel
-4. Store all API keys in encrypted secret files
+2. **Never** open port 18789 in your firewall
+3. **Never** modify the gateway to bind to `0.0.0.0`
+4. Access dashboard only via SSH tunnel: `ssh -L 18789:127.0.0.1:18789 user@server`
+5. Store all API keys in encrypted secret files
 
 ---
 
