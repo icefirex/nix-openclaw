@@ -41,18 +41,27 @@ nix build github:icefirex/nix-openclaw#virtualbox
 nix build github:icefirex/nix-openclaw#proxmox-lxc
 ```
 
-After booting, create your secrets and configure:
+After booting, set up your secrets using agenix (recommended) or manually for testing:
 
 ```bash
 # Login: admin / changeme
+
+# For production: use agenix (see "Using with agenix" section below)
+# For quick testing only:
 sudo mkdir -p /run/secrets
 echo "your-api-key" | sudo tee /run/secrets/zai-api-key
 echo "your-telegram-token" | sudo tee /run/secrets/telegram-bot-token
+head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32 | sudo tee /run/secrets/gateway-token
 sudo chmod 600 /run/secrets/*
 
-# Edit /etc/nixos/configuration.nix to set your Telegram user ID
+# Edit /etc/nixos/configuration.nix:
+#   - Set programs.openclaw.user = "admin";
+#   - Set programs.openclaw.gatewayTokenFile = "/run/secrets/gateway-token";
+#   - Set your Telegram user ID in telegram.allowFrom
 sudo nixos-rebuild switch
 ```
+
+> **Note:** Manual secrets in `/run/secrets/` are lost on reboot. For persistent, secure secrets, use agenix as documented below.
 
 The VM includes Cockpit (web UI on port 9090), SSH, and OpenClaw with Telegram and Whisper.
 
