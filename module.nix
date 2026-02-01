@@ -58,11 +58,11 @@ let
       headless = true;
       noSandbox = true;
     };
-    # Configure Z.AI provider with correct base URL
+    # Configure Z.AI provider with Coding Plan endpoint
     models = {
       providers = {
         zai = {
-          baseUrl = "https://api.z.ai/api/paas/v4";
+          baseUrl = "https://api.z.ai/api/coding/paas/v4";
           apiKey = "ZAI_API_KEY";
           models = [];
         };
