@@ -508,6 +508,52 @@ If you need remote access, SSH is already available and battle-tested. Adding an
 
 ---
 
+## Comparison with Official nix-openclaw
+
+There is an [official nix-openclaw](https://github.com/openclaw/nix-openclaw) maintained by the OpenClaw team. This repository takes a different approach optimized for headless server deployments with a focus on security.
+
+### Key Differences
+
+| Aspect | **This Repo** | **Official** |
+|--------|---------------|--------------|
+| **Architecture** | NixOS system module | Home-manager module |
+| **Service Type** | System service (runs as dedicated user) | User service (launchd/systemd --user) |
+| **Platforms** | Linux (servers/VMs) | macOS + Linux (desktop) |
+| **Structure** | Single `module.nix` | Modular (~15 files) |
+| **License** | MIT | AGPL-3.0 |
+
+### Security
+
+| Feature | **This Repo** | **Official** |
+|---------|---------------|--------------|
+| Dashboard binding | Localhost only (zero-trust) | Not specified |
+| Gateway token | `gatewayTokenFile` option | Env var or inline config |
+| Secrets docs | Step-by-step agenix guide | Brief mention |
+| Firewall guidance | Explicit "never expose" | Not mentioned |
+
+### Features
+
+| Feature | **This Repo** | **Official** |
+|---------|---------------|--------------|
+| VM Images | ✅ QCOW2, ISO, VMware, VBox, Proxmox | ❌ |
+| Plugin System | Basic (skills-registry) | Advanced (10+ first-party) |
+| macOS Support | ❌ | ✅ (app bundle + launchd) |
+| Multi-instance | ❌ | ✅ (prod/dev) |
+| Slack Integration | ✅ Built-in | ❌ |
+| Whisper | ✅ Built-in option | Via plugin |
+
+### When to Use Which
+
+| **Use this repo if you want:** | **Use official if you want:** |
+|--------------------------------|-------------------------------|
+| Headless server/VM deployment | macOS desktop integration |
+| Zero-trust security model | Rich plugin ecosystem |
+| NixOS system modules | Home-manager integration |
+| Pre-built VM images | Multi-instance (prod/dev) |
+| Simple, auditable config | Advanced customization |
+
+---
+
 ## Examples
 
 The `example/` directory contains reference configurations:
