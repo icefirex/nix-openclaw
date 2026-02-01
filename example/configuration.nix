@@ -15,7 +15,8 @@
   # networking.hostName = "myhost";
   # users.users.myuser = { ... };
 
-  # Create secrets directory (or use sops-nix/agenix)
+  # Create secrets directory (or use sops-nix/agenix - recommended for production)
+  # Generate gateway token: head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32
   systemd.tmpfiles.rules = [
     "d /run/secrets 0700 root root -"
   ];
@@ -23,9 +24,13 @@
   # OpenClaw configuration
   programs.openclaw = {
     enable = true;
+    user = "myuser";  # Required: user to run the service as
 
     # Model format: provider/model-name
     model = "zai/glm-4.7";
+
+    # Dashboard authentication (create /run/secrets/gateway-token)
+    gatewayTokenFile = "/run/secrets/gateway-token";
 
     # Secrets - map env var names to secret file paths
     secrets = {

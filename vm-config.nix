@@ -12,13 +12,14 @@
   networking.hostName = "openclaw-server";
   networking.networkmanager.enable = true;
 
-  # Firewall - allow Cockpit and OpenClaw gateway
+  # Firewall - SSH and Cockpit only
+  # OpenClaw dashboard is intentionally NOT exposed (zero-trust)
+  # Access it via SSH tunnel: ssh -L 18789:127.0.0.1:18789 admin@server
   networking.firewall = {
     enable = true;
     allowedTCPPorts = [
       22     # SSH
       9090   # Cockpit
-      18789  # OpenClaw gateway
     ];
   };
 
@@ -72,6 +73,9 @@
   # Create these files after first boot:
   #   /run/secrets/zai-api-key
   #   /run/secrets/telegram-bot-token
+  #   /run/secrets/gateway-token (generate with: head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
+  #
+  # For production, use agenix instead of manual /run/secrets (see README)
   systemd.tmpfiles.rules = [
     "d /run/secrets 0700 root root -"
   ];
@@ -81,11 +85,16 @@
   # ===================
   programs.openclaw = {
     enable = true;
+    user = "admin";  # Run service as this user
 
     # AI Model - format: provider/model-name
     model = "zai/glm-4.7";
     thinkingDefault = "high";
     gatewayPort = 18789;
+
+    # Dashboard authentication token
+    # Create /run/secrets/gateway-token after first boot
+    gatewayTokenFile = "/run/secrets/gateway-token";
 
     # Secrets - map env var names to file paths
     # Create these files after first boot
