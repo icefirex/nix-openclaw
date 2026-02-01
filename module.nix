@@ -58,6 +58,16 @@ let
       headless = true;
       noSandbox = true;
     };
+    # Configure Z.AI provider with correct base URL
+    models = {
+      providers = {
+        zai = {
+          baseUrl = "https://api.z.ai/api/paas/v4";
+          apiKey = "ZAI_API_KEY";
+          models = [];
+        };
+      };
+    };
     agents = {
       defaults = {
         model.primary = cfg.model;
@@ -220,6 +230,18 @@ in {
       default = ".openclaw";
       description = "State directory relative to HOME";
     };
+
+    user = lib.mkOption {
+      type = lib.types.str;
+      description = "User to run the openclaw service as (required)";
+      example = "alice";
+    };
+
+    group = lib.mkOption {
+      type = lib.types.str;
+      default = "users";
+      description = "Group to run the openclaw service as";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -238,16 +260,17 @@ in {
     environment.systemPackages = [ openclaw ]
       ++ lib.optional cfg.whisper.enable pkgs.openai-whisper;
 
-    systemd.user.services.openclaw-gateway = {
+    # System service running as specified user (not a user service)
+    systemd.services.openclaw-gateway = {
       description = "OpenClaw Gateway";
-      wantedBy = [ "default.target" ];
+      wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
 
       environment = {
-        HOME = "%h";
-        OPENCLAW_CONFIG_PATH = "%h/${cfg.stateDir}/openclaw.json";
-        OPENCLAW_STATE_DIR = "%h/${cfg.stateDir}";
+        HOME = "/home/${cfg.user}";
+        OPENCLAW_CONFIG_PATH = "/home/${cfg.user}/${cfg.stateDir}/openclaw.json";
+        OPENCLAW_STATE_DIR = "/home/${cfg.user}/${cfg.stateDir}";
       };
 
       script = ''
@@ -281,67 +304,100 @@ in {
 
       serviceConfig = {
         Type = "simple";
-        ExecStartPre = pkgs.writeShellScript "openclaw-setup" ''
-          set -e
-          STATE_DIR="$HOME/${cfg.stateDir}"
+        User = cfg.user;
+        Group = cfg.group;
 
-          ${pkgs.coreutils}/bin/mkdir -p "$STATE_DIR/workspace" "$STATE_DIR/agents/main/sessions" "$STATE_DIR/credentials" "$STATE_DIR/skills"
-          ${pkgs.coreutils}/bin/chmod 700 "$STATE_DIR"
+        # Kill any zombie process holding the port before starting
+        ExecStartPre = [
+          (pkgs.writeShellScript "openclaw-kill-zombie" ''
+            # Kill any process holding port ${toString cfg.gatewayPort}
+            PORT_PID=$(${pkgs.lsof}/bin/lsof -ti tcp:${toString cfg.gatewayPort} 2>/dev/null || true)
+            if [ -n "$PORT_PID" ]; then
+              echo "Killing zombie process $PORT_PID holding port ${toString cfg.gatewayPort}"
+              kill -9 $PORT_PID 2>/dev/null || true
+              sleep 1
+            fi
+          '')
+          (pkgs.writeShellScript "openclaw-setup" ''
+            set -e
+            STATE_DIR="/home/${cfg.user}/${cfg.stateDir}"
 
-          ${lib.optionalString (enabledSkills != {}) ''
-            echo "Setting up openclaw skills..."
-            ${pkgs.coreutils}/bin/rm -rf "$STATE_DIR/skills"
-            ${pkgs.coreutils}/bin/mkdir -p "$STATE_DIR/skills"
-            ${pkgs.coreutils}/bin/cp -r ${skillsDir}/* "$STATE_DIR/skills/" 2>/dev/null || true
-            ${pkgs.coreutils}/bin/chmod -R u+w "$STATE_DIR/skills"
-            echo "Skills installed: ${lib.concatStringsSep ", " (lib.attrNames enabledSkills)}"
+            ${pkgs.coreutils}/bin/mkdir -p "$STATE_DIR/workspace" "$STATE_DIR/agents/main/sessions" "$STATE_DIR/credentials" "$STATE_DIR/skills"
+            ${pkgs.coreutils}/bin/chmod 700 "$STATE_DIR"
 
-            ${lib.optionalString (cfg.skills.asana.enable or false) ''
-              if [ ! -f "$STATE_DIR/asana/token.json" ]; then
-                echo ""
-                echo "Asana skill requires OAuth setup!"
-                echo "   Run: node $STATE_DIR/skills/asana/scripts/configure.mjs --client-id YOUR_ID --client-secret YOUR_SECRET"
-                echo "   Then: node $STATE_DIR/skills/asana/scripts/oauth_oob.mjs authorize"
-                echo ""
+            ${lib.optionalString (enabledSkills != {}) ''
+              echo "Setting up openclaw skills..."
+              ${pkgs.coreutils}/bin/rm -rf "$STATE_DIR/skills"
+              ${pkgs.coreutils}/bin/mkdir -p "$STATE_DIR/skills"
+              ${pkgs.coreutils}/bin/cp -r ${skillsDir}/* "$STATE_DIR/skills/" 2>/dev/null || true
+              ${pkgs.coreutils}/bin/chmod -R u+w "$STATE_DIR/skills"
+              echo "Skills installed: ${lib.concatStringsSep ", " (lib.attrNames enabledSkills)}"
+
+              ${lib.optionalString (cfg.skills.asana.enable or false) ''
+                if [ ! -f "$STATE_DIR/asana/token.json" ]; then
+                  echo ""
+                  echo "Asana skill requires OAuth setup!"
+                  echo "   Run: node $STATE_DIR/skills/asana/scripts/configure.mjs --client-id YOUR_ID --client-secret YOUR_SECRET"
+                  echo "   Then: node $STATE_DIR/skills/asana/scripts/oauth_oob.mjs authorize"
+                  echo ""
+                fi
+              ''}
+            ''}
+
+            # Generate config with workspace path fixed
+            ${pkgs.gnused}/bin/sed 's|/tmp/openclaw-workspace|'"$STATE_DIR"'/workspace|g' ${configFile} > "$STATE_DIR/openclaw.json"
+
+            # Inject Telegram bot token into config
+            ${lib.optionalString (cfg.telegram.enable && cfg.telegram.botTokenFile != null) ''
+              if [ -f "${cfg.telegram.botTokenFile}" ]; then
+                TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.telegram.botTokenFile}")
+                ${pkgs.jq}/bin/jq --arg token "$TOKEN" '.channels.telegram.botToken = $token' \
+                  "$STATE_DIR/openclaw.json" > "$STATE_DIR/openclaw.json.tmp"
+                ${pkgs.coreutils}/bin/mv "$STATE_DIR/openclaw.json.tmp" "$STATE_DIR/openclaw.json"
               fi
             ''}
-          ''}
 
-          # Generate config with workspace path fixed
-          ${pkgs.gnused}/bin/sed 's|/tmp/openclaw-workspace|'"$STATE_DIR"'/workspace|g' ${configFile} > "$STATE_DIR/openclaw.json"
+            # Inject Slack tokens into config
+            ${lib.optionalString (cfg.slack.enable && cfg.slack.appTokenFile != null && cfg.slack.botTokenFile != null) ''
+              if [ -f "${cfg.slack.appTokenFile}" ] && [ -f "${cfg.slack.botTokenFile}" ]; then
+                SLACK_APP_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.slack.appTokenFile}")
+                SLACK_BOT_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.slack.botTokenFile}")
+                ${pkgs.jq}/bin/jq --arg appToken "$SLACK_APP_TOKEN" --arg botToken "$SLACK_BOT_TOKEN" \
+                  '.channels.slack.appToken = $appToken | .channels.slack.botToken = $botToken' \
+                  "$STATE_DIR/openclaw.json" > "$STATE_DIR/openclaw.json.tmp"
+                ${pkgs.coreutils}/bin/mv "$STATE_DIR/openclaw.json.tmp" "$STATE_DIR/openclaw.json"
+              fi
+            ''}
 
-          # Inject Telegram bot token into config
-          ${lib.optionalString (cfg.telegram.enable && cfg.telegram.botTokenFile != null) ''
-            if [ -f "${cfg.telegram.botTokenFile}" ]; then
-              TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.telegram.botTokenFile}")
-              ${pkgs.jq}/bin/jq --arg token "$TOKEN" '.channels.telegram.botToken = $token' \
-                "$STATE_DIR/openclaw.json" > "$STATE_DIR/openclaw.json.tmp"
-              ${pkgs.coreutils}/bin/mv "$STATE_DIR/openclaw.json.tmp" "$STATE_DIR/openclaw.json"
-            fi
-          ''}
+            # Inject gateway token
+            GATEWAY_TOKEN="openclaw-local-$(${pkgs.inetutils}/bin/hostname)"
+            ${pkgs.jq}/bin/jq --arg token "$GATEWAY_TOKEN" '.gateway.auth.token = $token | .gateway.remote.token = $token' \
+              "$STATE_DIR/openclaw.json" > "$STATE_DIR/openclaw.json.tmp"
+            ${pkgs.coreutils}/bin/mv "$STATE_DIR/openclaw.json.tmp" "$STATE_DIR/openclaw.json"
 
-          # Inject Slack tokens into config
-          ${lib.optionalString (cfg.slack.enable && cfg.slack.appTokenFile != null && cfg.slack.botTokenFile != null) ''
-            if [ -f "${cfg.slack.appTokenFile}" ] && [ -f "${cfg.slack.botTokenFile}" ]; then
-              SLACK_APP_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.slack.appTokenFile}")
-              SLACK_BOT_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.slack.botTokenFile}")
-              ${pkgs.jq}/bin/jq --arg appToken "$SLACK_APP_TOKEN" --arg botToken "$SLACK_BOT_TOKEN" \
-                '.channels.slack.appToken = $appToken | .channels.slack.botToken = $botToken' \
-                "$STATE_DIR/openclaw.json" > "$STATE_DIR/openclaw.json.tmp"
-              ${pkgs.coreutils}/bin/mv "$STATE_DIR/openclaw.json.tmp" "$STATE_DIR/openclaw.json"
-            fi
-          ''}
+            ${pkgs.coreutils}/bin/chmod 600 "$STATE_DIR/openclaw.json"
+          '')
+        ];
 
-          # Inject gateway token
-          GATEWAY_TOKEN="openclaw-local-$(${pkgs.inetutils}/bin/hostname)"
-          ${pkgs.jq}/bin/jq --arg token "$GATEWAY_TOKEN" '.gateway.auth.token = $token | .gateway.remote.token = $token' \
-            "$STATE_DIR/openclaw.json" > "$STATE_DIR/openclaw.json.tmp"
-          ${pkgs.coreutils}/bin/mv "$STATE_DIR/openclaw.json.tmp" "$STATE_DIR/openclaw.json"
-
-          ${pkgs.coreutils}/bin/chmod 600 "$STATE_DIR/openclaw.json"
+        # Ensure clean shutdown - kill any child processes
+        ExecStopPost = pkgs.writeShellScript "openclaw-cleanup" ''
+          # Kill any remaining process holding the port
+          PORT_PID=$(${pkgs.lsof}/bin/lsof -ti tcp:${toString cfg.gatewayPort} 2>/dev/null || true)
+          if [ -n "$PORT_PID" ]; then
+            echo "Cleaning up process $PORT_PID still holding port ${toString cfg.gatewayPort}"
+            kill -9 $PORT_PID 2>/dev/null || true
+          fi
         '';
-        Restart = "always";
+
+        # Restart configuration with limits to prevent infinite crash loops
+        Restart = "on-failure";
         RestartSec = "10s";
+      };
+
+      # Restart limits: max 5 attempts within 5 minutes before giving up
+      unitConfig = {
+        StartLimitBurst = 5;
+        StartLimitIntervalSec = 300;
       };
     };
   };
