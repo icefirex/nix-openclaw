@@ -242,6 +242,13 @@ in {
       default = "users";
       description = "Group to run the openclaw service as";
     };
+
+    gatewayTokenFile = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "Path to file containing the gateway authentication token. If not set, a weak default token is generated.";
+      example = "/run/agenix/gateway-token";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -296,7 +303,13 @@ in {
           fi
         ''}
 
-        GATEWAY_TOKEN="''${OPENCLAW_GATEWAY_TOKEN:-openclaw-local-$(${pkgs.inetutils}/bin/hostname)}"
+        # Load gateway token from file or use default
+        ${lib.optionalString (cfg.gatewayTokenFile != null) ''
+          if [ -f "${cfg.gatewayTokenFile}" ]; then
+            GATEWAY_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.gatewayTokenFile}")
+          fi
+        ''}
+        GATEWAY_TOKEN="''${GATEWAY_TOKEN:-''${OPENCLAW_GATEWAY_TOKEN:-openclaw-local-$(${pkgs.inetutils}/bin/hostname)}}"
         export OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN"
 
         exec ${openclaw}/bin/openclaw gateway --port ${toString cfg.gatewayPort} --token "$GATEWAY_TOKEN"
@@ -376,8 +389,13 @@ in {
               fi
             ''}
 
-            # Inject gateway token
-            GATEWAY_TOKEN="openclaw-local-$(${pkgs.inetutils}/bin/hostname)"
+            # Inject gateway token (from file if configured, otherwise use weak default)
+            ${lib.optionalString (cfg.gatewayTokenFile != null) ''
+              if [ -f "${cfg.gatewayTokenFile}" ]; then
+                GATEWAY_TOKEN=$(${pkgs.coreutils}/bin/cat "${cfg.gatewayTokenFile}")
+              fi
+            ''}
+            GATEWAY_TOKEN="''${GATEWAY_TOKEN:-openclaw-local-$(${pkgs.inetutils}/bin/hostname)}"
             ${pkgs.jq}/bin/jq --arg token "$GATEWAY_TOKEN" '.gateway.auth.token = $token | .gateway.remote.token = $token' \
               "$STATE_DIR/openclaw.json" > "$STATE_DIR/openclaw.json.tmp"
             ${pkgs.coreutils}/bin/mv "$STATE_DIR/openclaw.json.tmp" "$STATE_DIR/openclaw.json"
