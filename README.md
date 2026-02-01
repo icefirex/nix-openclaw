@@ -11,11 +11,13 @@ NixOS module for [OpenClaw](https://openclaw.ai) - AI assistant gateway for mess
 ## Features
 
 - Fully declarative NixOS configuration via `programs.openclaw`
-- Systemd user service for the gateway
+- Systemd service running as configurable user (secure by default)
+- **Control UI Dashboard** - Web interface for monitoring and management
 - Telegram and Slack integration
 - Optional Whisper audio transcription
 - Skills registry (Asana, etc.)
 - Generic secrets management (works with any provider, sops-nix, agenix, or manual)
+- Secure gateway token authentication (supports agenix/sops-nix)
 - Pre-built VM images (QCOW2, ISO, VMware, VirtualBox, Proxmox)
 
 ## Quick Start: VM Images
@@ -88,6 +90,7 @@ All secrets are referenced by file path. Just point to your secret files and reb
 {
   programs.openclaw = {
     enable = true;
+    user = "myuser";  # Required: user to run the service as
 
     # AI model (format: provider/model-name)
     model = "zai/glm-4.7";
@@ -96,6 +99,9 @@ All secrets are referenced by file path. Just point to your secret files and reb
     secrets = {
       ZAI_API_KEY = "/run/secrets/zai-api-key";
     };
+
+    # Secure gateway token for dashboard authentication (recommended)
+    gatewayTokenFile = "/run/secrets/gateway-token";
 
     # Telegram integration
     telegram = {
@@ -112,6 +118,41 @@ All secrets are referenced by file path. Just point to your secret files and reb
   };
 }
 ```
+
+## Control UI Dashboard
+
+OpenClaw includes a web-based dashboard for monitoring and managing your gateway. By default, it binds to localhost only for security.
+
+### Accessing the Dashboard
+
+The dashboard requires authentication via a gateway token. Access it securely via SSH tunnel:
+
+```bash
+# Create SSH tunnel (run on your local machine)
+ssh -L 18789:127.0.0.1:18789 user@your-server
+
+# Then open in browser:
+# http://localhost:18789/?token=YOUR_GATEWAY_TOKEN
+```
+
+### Gateway Token Security
+
+By default, a weak token is generated (`openclaw-local-hostname`). For production, use a secure random token via `gatewayTokenFile`:
+
+```nix
+programs.openclaw = {
+  enable = true;
+  user = "myuser";
+  gatewayTokenFile = "/run/secrets/gateway-token";  # 32+ char random string
+};
+```
+
+Generate a secure token:
+```bash
+head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32
+```
+
+---
 
 ## Secrets
 
@@ -174,20 +215,90 @@ sudo chmod 600 /run/secrets/*
 </details>
 
 <details>
-<summary><h2>Using with agenix</h2></summary>
+<summary><h2>Using with agenix (Recommended)</h2></summary>
+
+Agenix encrypts secrets with age, using SSH keys for decryption. Secrets are decrypted at system activation and stored in `/run/agenix/`.
+
+### Step 1: Create secrets.nix
+
+Define which keys can decrypt each secret:
+
+```nix
+# secrets/secrets.nix
+let
+  # Your server's SSH host key (get with: ssh-keyscan your-server 2>/dev/null | grep ed25519)
+  server = "ssh-ed25519 AAAAC3...your-server-host-key";
+
+  # Your personal SSH key (for local encryption)
+  admin = "ssh-ed25519 AAAAC3...your-personal-key";
+in
+{
+  "zai-api-key.age".publicKeys = [ server admin ];
+  "telegram-bot-token.age".publicKeys = [ server admin ];
+  "gateway-token.age".publicKeys = [ server admin ];
+}
+```
+
+### Step 2: Encrypt secrets
+
+```bash
+cd secrets/
+
+# Create and encrypt API key
+echo "your-zai-api-key" > /tmp/zai-key
+age -R <(echo "ssh-ed25519 AAAAC3...server-key") \
+    -R <(echo "ssh-ed25519 AAAAC3...admin-key") \
+    -o zai-api-key.age /tmp/zai-key
+rm /tmp/zai-key
+
+# Create and encrypt Telegram token
+echo "123456:ABC-your-bot-token" > /tmp/tg-token
+age -R <(echo "ssh-ed25519 AAAAC3...server-key") \
+    -R <(echo "ssh-ed25519 AAAAC3...admin-key") \
+    -o telegram-bot-token.age /tmp/tg-token
+rm /tmp/tg-token
+
+# Create and encrypt gateway token (generate random)
+head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32 > /tmp/gw-token
+age -R <(echo "ssh-ed25519 AAAAC3...server-key") \
+    -R <(echo "ssh-ed25519 AAAAC3...admin-key") \
+    -o gateway-token.age /tmp/gw-token
+cat /tmp/gw-token  # Save this for dashboard access!
+rm /tmp/gw-token
+```
+
+### Step 3: Configure NixOS
 
 ```nix
 { config, ... }:
 
 {
+  # Tell agenix where to find the host's private key
+  age.identityPaths = [ "/etc/ssh/ssh_host_ed25519_key" ];
+
   age.secrets = {
-    zai-api-key.file = ../secrets/zai-api-key.age;
-    telegram-bot-token.file = ../secrets/telegram-bot-token.age;
+    zai-api-key = {
+      file = ./secrets/zai-api-key.age;
+      owner = "myuser";
+      mode = "0400";
+    };
+    telegram-bot-token = {
+      file = ./secrets/telegram-bot-token.age;
+      owner = "myuser";
+      mode = "0400";
+    };
+    gateway-token = {
+      file = ./secrets/gateway-token.age;
+      owner = "myuser";
+      mode = "0400";
+    };
   };
 
   programs.openclaw = {
     enable = true;
+    user = "myuser";
     model = "zai/glm-4.7";
+    gatewayTokenFile = config.age.secrets.gateway-token.path;
 
     secrets = {
       ZAI_API_KEY = config.age.secrets.zai-api-key.path;
@@ -201,6 +312,13 @@ sudo chmod 600 /run/secrets/*
   };
 }
 ```
+
+### Security Notes
+
+- **Never commit unencrypted secrets** - Only `.age` files should be in git
+- **Use the server's host key** - This ensures only that specific server can decrypt
+- **Add your admin key** - So you can re-encrypt or update secrets locally
+- **Secrets go to `/run/agenix/`** - A tmpfs, never written to disk unencrypted
 
 </details>
 
@@ -272,7 +390,7 @@ node ~/.openclaw/skills/asana/scripts/configure.mjs --client-id "ID" --client-se
 node ~/.openclaw/skills/asana/scripts/oauth_oob.mjs authorize
 # Follow URL, get code
 node ~/.openclaw/skills/asana/scripts/oauth_oob.mjs token --code "CODE"
-systemctl --user restart openclaw-gateway
+sudo systemctl restart openclaw-gateway
 ```
 
 </details>
@@ -284,9 +402,12 @@ systemctl --user restart openclaw-gateway
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enable` | bool | `false` | Enable OpenClaw |
+| `user` | string | **required** | User to run the service as |
+| `group` | string | `"users"` | Group to run the service as |
 | `model` | string | `"anthropic/claude-sonnet-4"` | AI model (provider/model-name) |
 | `thinkingDefault` | string | `"high"` | Default thinking level |
-| `gatewayPort` | int | `18789` | Gateway port |
+| `gatewayPort` | int | `18789` | Gateway port (binds to localhost) |
+| `gatewayTokenFile` | path | `null` | Path to file with dashboard auth token |
 | `stateDir` | string | `".openclaw"` | State directory (relative to HOME) |
 | `secrets` | attrsOf path | `{}` | Map of env var names to secret file paths |
 | `telegram.enable` | bool | `false` | Enable Telegram |
@@ -304,13 +425,51 @@ systemctl --user restart openclaw-gateway
 ## Troubleshooting
 
 ```bash
-# Check service
-systemctl --user status openclaw-gateway
-journalctl --user -u openclaw-gateway -f
+# Check service status
+sudo systemctl status openclaw-gateway
 
-# Check config
-cat ~/.openclaw/openclaw.json | jq .
+# View logs
+sudo journalctl -u openclaw-gateway -f
+
+# Check config (replace 'myuser' with your configured user)
+sudo cat /home/myuser/.openclaw/openclaw.json | jq .
+
+# Restart service
+sudo systemctl restart openclaw-gateway
+
+# Check if port is listening
+ss -tlnp | grep 18789
 ```
+
+### Common Issues
+
+**Service fails to start with port in use:**
+The service automatically kills stale openclaw processes on the configured port. If issues persist, manually check: `lsof -i :18789`
+
+**Dashboard shows "unauthorized":**
+Ensure you're using the correct token in the URL: `http://localhost:18789/?token=YOUR_TOKEN`
+
+**Secrets not loading:**
+Check that secret files exist and have correct permissions (should be readable by the configured user).
+
+## Security
+
+OpenClaw is configured with security in mind:
+
+- **Service isolation** - Runs as a dedicated user (not root)
+- **Localhost binding** - Gateway only listens on 127.0.0.1, not exposed to network
+- **Token authentication** - Dashboard requires a secret token
+- **Encrypted secrets** - Supports agenix/sops-nix for encrypted secret storage
+- **Automatic cleanup** - Safely terminates stale processes on restart
+
+### Recommended Setup
+
+1. Use `gatewayTokenFile` with agenix for secure dashboard authentication
+2. Keep the firewall closed for the gateway port (default: 18789)
+3. Access dashboard only via SSH tunnel
+4. Store all API keys in encrypted secret files
+
+---
 
 ## Examples
 
