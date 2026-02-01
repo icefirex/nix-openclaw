@@ -202,11 +202,14 @@ sudo chmod 600 /run/secrets/*
   sops.secrets = {
     zai-api-key = {};
     telegram-bot-token = {};
+    gateway-token = {};
   };
 
   programs.openclaw = {
     enable = true;
+    user = "myuser";
     model = "zai/glm-4.7";
+    gatewayTokenFile = config.sops.secrets.gateway-token.path;
 
     secrets = {
       ZAI_API_KEY = config.sops.secrets.zai-api-key.path;
@@ -337,6 +340,7 @@ rm /tmp/gw-token
 ```nix
 programs.openclaw = {
   enable = true;
+  user = "myuser";
 
   slack = {
     enable = true;
@@ -364,6 +368,7 @@ programs.openclaw = {
 ```nix
 programs.openclaw = {
   enable = true;
+  user = "myuser";
 
   whisper = {
     enable = true;
@@ -388,6 +393,7 @@ programs.openclaw = {
 ```nix
 programs.openclaw = {
   enable = true;
+  user = "myuser";
   skills.asana.enable = true;
 };
 ```
@@ -422,11 +428,14 @@ sudo systemctl restart openclaw-gateway
 | `telegram.enable` | bool | `false` | Enable Telegram |
 | `telegram.botTokenFile` | path | required | Path to bot token file |
 | `telegram.allowFrom` | list of int | `[]` | Allowed user IDs |
+| `telegram.groups` | attrs | `{}` | Telegram group configurations |
 | `slack.enable` | bool | `false` | Enable Slack |
 | `slack.appTokenFile` | path | required | Path to app token file |
 | `slack.botTokenFile` | path | required | Path to bot token file |
+| `slack.dmPolicy` | string | `"pairing"` | DM policy (pairing, open) |
+| `slack.groupPolicy` | string | `"open"` | Group policy (open, allowlist, disabled) |
 | `whisper.enable` | bool | `false` | Enable Whisper |
-| `whisper.model` | enum | `"base"` | Model size |
+| `whisper.model` | enum | `"base"` | Model size (tiny, base, small, medium, large) |
 | `skills.asana.enable` | bool | `false` | Enable Asana skill |
 
 ---
