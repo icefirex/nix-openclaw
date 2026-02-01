@@ -130,7 +130,7 @@ All secrets are referenced by file path. Just point to your secret files and reb
 
 ## Control UI Dashboard
 
-OpenClaw includes a web-based dashboard for monitoring and managing your gateway. By default, it binds to localhost only for security.
+OpenClaw includes a web-based dashboard for monitoring and managing your gateway. This module configures it to bind to localhost only for security.
 
 ### Accessing the Dashboard
 
@@ -146,7 +146,7 @@ ssh -L 18789:127.0.0.1:18789 user@your-server
 
 ### Gateway Token Security
 
-By default, a weak token is generated (`openclaw-local-hostname`). For production, use a secure random token via `gatewayTokenFile`:
+If `gatewayTokenFile` is not set, this module generates a weak default token (`openclaw-local-hostname`). For production, use a secure random token:
 
 ```nix
 programs.openclaw = {
@@ -472,19 +472,19 @@ Check that secret files exist and have correct permissions (should be readable b
 
 ## Security
 
-OpenClaw follows a **zero-trust security model** by default:
+This module implements a **zero-trust security model** by default:
 
 - **Service isolation** - Runs as a dedicated user (not root)
-- **Localhost binding** - Gateway only listens on 127.0.0.1, not exposed to network
-- **Token authentication** - Dashboard requires a secret token
-- **Encrypted secrets** - Supports agenix/sops-nix for encrypted secret storage
+- **Localhost binding** - Gateway binds to 127.0.0.1 only (module default)
+- **Token authentication** - Dashboard requires a secret token (OpenClaw feature)
+- **Encrypted secrets** - Integrates with agenix/sops-nix for secure storage
 - **Automatic cleanup** - Safely terminates stale processes on restart
 
 ### Zero-Trust: Keep the Dashboard Local
 
 > **⚠️ Do not expose the dashboard port to the network.**
 
-The gateway intentionally binds to `127.0.0.1` only. This is by design. Even with token authentication, exposing the dashboard port to the internet or local network is **strongly discouraged**:
+This module configures the gateway to bind to `127.0.0.1` only. This is by design. Even with token authentication, exposing the dashboard port to the internet or local network is **strongly discouraged**:
 
 - Tokens can be leaked, brute-forced, or intercepted
 - The dashboard provides full control over your AI gateway
@@ -558,7 +558,7 @@ There is an [official nix-openclaw](https://github.com/openclaw/nix-openclaw) ma
 
 The `example/` directory contains reference configurations:
 
-- **`example/`** - Minimal OpenClaw options to add to an existing NixOS config
+- **`example/`** - Minimal nix-openclaw options to add to an existing NixOS config
 - **`example/full-vm/`** - Complete VM configuration for manual NixOS installs (includes QEMU guest agent, Cockpit, etc.)
 
 ## License
