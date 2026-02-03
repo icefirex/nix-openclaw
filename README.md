@@ -4,6 +4,15 @@
   <img align="middle" src="https://raw.githubusercontent.com/openclaw/openclaw/main/docs/assets/openclaw-logo-text.png" height="80" alt="OpenClaw">
 </p>
 
+> [!IMPORTANT]
+> **📢 Looking for the official OpenClaw Nix module?**
+>
+> This is a **community/personal implementation** tailored for specific deployment needs (headless servers, zero-trust security, pre-built VM images). For the official, fully-featured Nix module maintained by the OpenClaw team, please visit:
+>
+> **👉 [github.com/openclaw/nix-openclaw](https://github.com/openclaw/nix-openclaw)**
+>
+> This repository is provided as-is for those who find its opinionated approach useful. See the [comparison section](#comparison-with-official-nix-openclaw) below for differences.
+
 # nix-openclaw
 
 NixOS module for [OpenClaw](https://openclaw.ai) - AI assistant gateway for messaging platforms.
