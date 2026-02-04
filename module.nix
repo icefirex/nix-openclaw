@@ -224,6 +224,9 @@ in {
       asana = {
         enable = lib.mkEnableOption "Asana integration skill";
       };
+      brave-images = {
+        enable = lib.mkEnableOption "Brave image search skill";
+      };
     };
 
     stateDir = lib.mkOption {

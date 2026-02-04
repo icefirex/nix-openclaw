@@ -35,6 +35,25 @@
     '';
   };
 
+  brave-images = {
+    name = "brave-images";
+    version = "1.0.1";
+    description = "Search for images using Brave Search API";
+    src = pkgs.stdenv.mkDerivation {
+      name = "brave-images-skill-src";
+      src = pkgs.fetchurl {
+        url = "https://clawhub.ai/api/v1/download?slug=brave-images";
+        sha256 = "sha256-rqeKUQ1Un+Vokctar1p/XH0ginGZdlbTOL3BNep98h4=";
+      };
+      nativeBuildInputs = [ pkgs.unzip ];
+      unpackPhase = "unzip $src";
+      installPhase = "mkdir -p $out && cp -r * $out/";
+    };
+    setupInstructions = ''
+      Requires BRAVE_API_KEY environment variable (already configured via secrets).
+    '';
+  };
+
   # Template for adding more skills:
   # skillName = {
   #   name = "skillName";
