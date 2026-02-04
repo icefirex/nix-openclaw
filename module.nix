@@ -54,6 +54,7 @@ let
     };
     browser = {
       enabled = true;
+      defaultProfile = "openclaw";
       executablePath = "/run/current-system/sw/bin/chromium";
       headless = true;
       noSandbox = true;
