@@ -36,6 +36,10 @@ let
           prefix = "[from {channel}] ";
         };
       };
+      web = {
+        provider = "brave";
+        apiKey = "BRAVE_API_KEY";
+      };
     }) // (if cfg.whisper.enable then {
       media = {
         audio = {
