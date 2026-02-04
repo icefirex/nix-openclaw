@@ -43,7 +43,7 @@
       name = "brave-images-skill-src";
       src = pkgs.fetchurl {
         url = "https://clawhub.ai/api/v1/download?slug=brave-images";
-        sha256 = "sha256-rqeKUQ1Un+Vokctar1p/XH0ginGZdlbTOL3BNep98h4=";
+        sha256 = "sha256-yc0GGnewaUtxBR8P48kEnjk68zu8o+ofyxSmbvCSldA=";
       };
       nativeBuildInputs = [ pkgs.unzip ];
       unpackPhase = "unzip $src";
