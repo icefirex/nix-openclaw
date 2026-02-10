@@ -11,13 +11,13 @@
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "openclaw";
-  version = "2026.2.6";
+  version = "2026.2.9";
 
   src = fetchFromGitHub {
     owner = "openclaw";
     repo = "openclaw";
     rev = "v${finalAttrs.version}";
-    hash = "sha256-fLWmXQHmFVBpE7tJQUDcGN/hQjjMQcTsnaCCdE9f3CM=";
+    hash = "sha256-2jBmKcnufPbuKC0ipEfSZNVJhOzxuZ1wRf92IOtxs+k=";
   };
 
   nativeBuildInputs = [
@@ -29,7 +29,7 @@ stdenv.mkDerivation (finalAttrs: {
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) pname version src;
-    hash = "sha256-k0bq4jM7JCh8yllespHMMIDwBU3j0bW8QUHHBPeVnHI=";
+    hash = "sha256-09F7RdmrzCg6mAyCMZ/5kd5T+vCW/BJ3fpRmsoXhRek=";
     fetcherVersion = 1;
   };
 
