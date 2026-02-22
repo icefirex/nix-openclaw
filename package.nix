@@ -11,13 +11,13 @@
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "openclaw";
-  version = "2026.2.19";
+  version = "2026.2.21";
 
   src = fetchFromGitHub {
     owner = "openclaw";
     repo = "openclaw";
     rev = "v${finalAttrs.version}";
-    hash = "sha256-P1yhTuHLr7BdRADlLnrNGbzjb8cNlRzjKJtrU6pY3cY=";
+    hash = "sha256-iV/n217XAkFaMdoYhBKoSthwmCYr2XzGcp7V4pVF008=";
   };
 
   nativeBuildInputs = [
@@ -29,19 +29,27 @@ stdenv.mkDerivation (finalAttrs: {
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) pname version src;
-    hash = "sha256-RgE9H1wvfR65V9uc/Do1RHkpN9QazF3+Jkz9RZ5DJg4=";
+    hash = "sha256-jSykh7F76MxuYEVAQHXuS4ZSBQPvbFvdlKRp5L5JXj8=";
     fetcherVersion = 1;
   };
 
   buildPhase = ''
     runHook preBuild
+    # Install UI deps first - canvas:a2ui:bundle (part of pnpm build) needs them
+    pnpm ui:install
+    # Symlink rolldown to node_modules/.bin so bundle-a2ui.sh finds it via command -v
+    # (rolldown is a transitive dep of tsdown, not hoisted to top-level .bin)
+    ROLLDOWN_BIN=$(find node_modules/.pnpm -path '*/rolldown/bin/cli.mjs' ! -path '*/rolldown-plugin-dts/*' | head -1)
+    ln -sf "$(readlink -f "$ROLLDOWN_BIN")" node_modules/.bin/rolldown
+    chmod +x node_modules/.bin/rolldown
     pnpm build
+    # Remove temp symlink so it doesn't end up as a broken link in the output
+    rm -f node_modules/.bin/rolldown
     # Build the control UI dashboard
     # Fix broken CDN logo URL - use local asset instead
     mkdir -p ui/public/assets
     cp docs/assets/pixel-lobster.svg ui/public/assets/
     sed -i 's|https://mintcdn.com/clawhub/[^"]*pixel-lobster.svg[^"]*|./assets/pixel-lobster.svg|g' ui/src/ui/app-render.ts
-    pnpm ui:install
     pnpm ui:build
     runHook postBuild
   '';
